@@ -47,7 +47,6 @@ app.add_middleware(
     allow_methods=["*"],        # includes OPTIONS (preflight)
     allow_headers=["*"],
 )
-
 @app.api_route("/process", methods=["POST", "OPTIONS"])
 async def process(req: Request):
     # Handle browser preflight fast
@@ -73,27 +72,28 @@ async def process(req: Request):
     has_captions = str(body.get("has_captions", "true")).lower() == "true"
     settings = body.get("settings", {})
     pause_trim_ms = int(settings.get("pause_trim_ms", 350))
-    tighten_to_ms = int(settings.get("tighten_to_ms", 170))
+    tighten_to_ms = int(settings.get("tighten_to_ms", 170))  # reserved for future
     lufs = float(settings.get("audio", {}).get("lufs", -14))
     peak = float(settings.get("audio", {}).get("peak_db", -1))
     hook_start = float(settings.get("export", {}).get("hook_start_min_sec", 0.3))
-    hook_dur = float(settings.get("export", {}).get("hook_duration_sec", 2.5))
+    hook_dur   = float(settings.get("export", {}).get("hook_duration_sec", 2.5))
 
     work = tempfile.mkdtemp()
     try:
+        # 1) Download
         src = os.path.join(work, "input.mp4")
         dl(raw_url, src)
 
-        # Transcribe with Whisper
+        # 2) Transcribe with Whisper
         wav = os.path.join(work, "audio.wav")
         run(["ffmpeg", "-y", "-i", src, "-vn", "-ac", "1", "-ar", "16000", wav])
         result = get_model().transcribe(wav, word_timestamps=True)
         transcript = result.get("text", "").strip()
 
-        # Make title hook
+        # 3) Build title hook
         title_hook = pick_title_hook(transcript)
 
-        # Shorten long silences
+        # 4) Tighten silences
         tight = os.path.join(work, "tight.mp4")
         run([
             "ffmpeg", "-y", "-i", src,
@@ -102,7 +102,7 @@ async def process(req: Request):
             "-c:v", "copy", tight
         ])
 
-        # Captions
+        # 5) Build captions (<=3 words)
         words = []
         for seg in result.get("segments", []):
             for w in seg.get("words", []):
@@ -113,8 +113,7 @@ async def process(req: Request):
             ass_path = os.path.join(work, "captions.ass")
             make_ass_from_chunks(words_to_chunks(words), ass_path)
 
-        # Burn text and export
-        staged = os.path.join(work, "staged.mp4")
+        # 6) Compose drawtext (escape quotes/colons)
         draw = (
             "drawtext=text='{}'"
             ":fontcolor=white:fontsize=64:borderw=4:bordercolor=black:"
@@ -125,20 +124,26 @@ async def process(req: Request):
             )
         )
 
+        # 7) Burn text (and subtitles if present)
+        staged = os.path.join(work, "staged.mp4")
         if ass_path:
             run([
                 "ffmpeg", "-y", "-i", tight,
-                "-vf", f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,subtitles='{ass_path}',{draw}",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", staged
+                "-vf", f"scale=1080:1920:force_original_aspect_ratio=increase,"
+                       f"crop=1080:1920,subtitles='{ass_path}',{draw}",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                "-c:a", "aac", staged
             ])
         else:
             run([
                 "ffmpeg", "-y", "-i", tight,
-                "-vf", f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,{draw}",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", staged
+                "-vf", f"scale=1080:1920:force_original_aspect_ratio=increase,"
+                       f"crop=1080:1920,{draw}",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                "-c:a", "aac", staged
             ])
 
-        # Loudness normalize
+        # 8) Loudness normalize & finalize
         final_mp4 = os.path.join(work, "final.mp4")
         run([
             "ffmpeg", "-y", "-i", staged,
@@ -147,6 +152,26 @@ async def process(req: Request):
             "-c:a", "aac", "-b:a", "160k", final_mp4
         ])
 
-        # Send back to Base44
+        # 9) Callback to Base44
         files = {"edited_file_upload": ("final.mp4", open(final_mp4, "rb"), "video/mp4")}
-        data = {"video_id": video_id, "status": "READY", "title_hook": title_hook}
+        data  = {"video_id": video_id, "status": "READY", "title_hook": title_hook}
+        requests.post(CALLBACK, data=data, files=files, timeout=120)
+
+        return {"ok": True}
+
+    except Exception as e:
+        # full traceback to logs
+        print("❌ Processing error:\n", traceback.format_exc())
+        # notify Base44 of failure
+        try:
+            requests.post(CALLBACK, json={
+                "video_id": video_id,
+                "status": "FAILED",
+                "error_msg": str(e)[:800]
+            }, timeout=60)
+        except:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
