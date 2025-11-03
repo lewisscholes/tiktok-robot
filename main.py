@@ -1,5 +1,5 @@
 import os, uuid, json, re, subprocess, tempfile, shutil, requests
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Response
 from pydub import AudioSegment
 import whisper
 
@@ -97,8 +97,11 @@ def pick_title_hook(text):
         line = " ".join(words[:8])
     return line
 
-@app.post("/process")
+@app.api_route("/process", methods=["POST", "OPTIONS"])
 async def process(req: Request):
+    # Reply to browser preflight instantly
+    if req.method == "OPTIONS":
+        return Response(status_code=204)
     body = await req.json()
     if body.get("auth") != APP_AUTH:
         raise HTTPException(status_code=401, detail="Bad auth")
