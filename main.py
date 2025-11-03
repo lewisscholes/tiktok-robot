@@ -107,7 +107,7 @@ async def process(req: Request):
         # Transcribe with Whisper
         wav = os.path.join(work, "audio.wav")
         run(["ffmpeg", "-y", "-i", src, "-vn", "-ac", "1", "-ar", "16000", wav])
-        result = MODEL.transcribe(wav, word_timestamps=True)
+        result = get_model().transcribe(wav, word_timestamps=True)
         transcript = result.get("text", "").strip()
 
         # Make hook text
