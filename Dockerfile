@@ -5,6 +5,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 ENV TRANSFORMERS_CACHE=/app/.cache
 COPY main.py .
-ENV PORT=8000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Render sets $PORT at runtime. Use it.
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT}"]
 
