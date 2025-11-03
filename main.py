@@ -17,6 +17,20 @@ def get_model():
     return _model
 
 app = FastAPI()
+from fastapi.middleware.cors import CORSMiddleware
+
+# Allow Base44 and browser-based requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],        # you can restrict later to ["https://base44.ai"]
+    allow_credentials=True,
+    allow_methods=["*"],        # includes OPTIONS (preflight)
+    allow_headers=["*"],
+)
+
+@app.options("/process")
+async def options_process():
+    return {}
 
 def run(cmd):
     """Run ffmpeg commands safely"""
