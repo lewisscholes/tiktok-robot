@@ -64,6 +64,27 @@ def run(cmd):
         raise RuntimeError(p.stderr)
     return p.stdout
 
+def pick_title_hook(text: str) -> str:
+    """Choose a short hook line from the transcript."""
+    if not text:
+        return "Watch this"
+
+    # Split into sentences
+    candidates = re.split(r'(?<=[.!?])\s+', text.strip())
+
+    # Prefer sentences with strong trigger words
+    strong = [c for c in candidates
+              if re.search(r'\b(how|what|why|stop|secret|best|avoid|never)\b', c, re.I)]
+
+    line = strong[0] if strong else (candidates[0] if candidates else "Watch this")
+
+    # Keep hook concise (max ~8 words)
+    words = line.split()
+    if len(words) > 8:
+        line = " ".join(words[:8])
+
+    return line    
+
 @app.api_route("/process", methods=["POST", "OPTIONS"])
 async def process(req: Request):
     # Handle browser preflight fast
