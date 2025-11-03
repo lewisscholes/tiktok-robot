@@ -55,6 +55,15 @@ def download_file(url, path):
         for chunk in r.iter_content(1024 * 1024):
             if chunk:
                 f.write(chunk)
+def run(cmd):
+    """Run a shell command (ffmpeg) and raise if it fails."""
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if p.returncode != 0:
+        # Log first chunk of stderr so we can see why it failed
+        print("FFmpeg error:\n", p.stderr[:2000])
+        raise RuntimeError(p.stderr)
+    return p.stdout
+
 @app.api_route("/process", methods=["POST", "OPTIONS"])
 async def process(req: Request):
     # Handle browser preflight fast
