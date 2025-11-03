@@ -47,6 +47,14 @@ app.add_middleware(
     allow_methods=["*"],        # includes OPTIONS (preflight)
     allow_headers=["*"],
 )
+def download_file(url, path):
+    """Download video file to a local path"""
+    r = requests.get(url, stream=True, timeout=120)
+    r.raise_for_status()
+    with open(path, "wb") as f:
+        for chunk in r.iter_content(1024 * 1024):
+            if chunk:
+                f.write(chunk)
 @app.api_route("/process", methods=["POST", "OPTIONS"])
 async def process(req: Request):
     # Handle browser preflight fast
@@ -82,7 +90,7 @@ async def process(req: Request):
     try:
         # 1) Download
         src = os.path.join(work, "input.mp4")
-        dl(raw_url, src)
+        download_file(raw_url, src)
 
         # 2) Transcribe with Whisper
         wav = os.path.join(work, "audio.wav")
