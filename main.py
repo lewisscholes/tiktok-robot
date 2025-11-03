@@ -6,7 +6,14 @@ import whisper
 # Read secrets from environment
 APP_AUTH = os.environ.get("AUTH_TOKEN", "changeme")
 CALLBACK = os.environ.get("BASE44_CALLBACK_URL", "")
-MODEL = whisper.load_model("base")  # you can change to "small" or "medium" later
+MODEL_NAME = os.environ.get("WHISPER_MODEL", "tiny")  # default to tiny
+_model = None
+
+def get_model():
+    global _model
+    if _model is None:
+        _model = whisper.load_model(MODEL_NAME)
+    return _model
 
 app = FastAPI()
 
