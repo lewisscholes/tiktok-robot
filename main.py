@@ -136,9 +136,15 @@ async def process(req: Request):
         # Burn text and export
         staged = os.path.join(work, "staged.mp4")
         if ass_path:
-            draw = (f"drawtext=text='{title_hook.replace(':','\\:').replace(\"'\",\"\\'\")}'"
-                    f":fontcolor=white:fontsize=64:borderw=4:bordercolor=black:"
-                    f"x=(w-tw)/2:y=h*0.2:enable='between(t,{hook_start},{hook_start+hook_dur})'")
+draw = (
+    "drawtext=text='{}'"
+    ":fontcolor=white:fontsize=64:borderw=4:bordercolor=black:"
+    "x=(w-tw)/2:y=h*0.2:enable='between(t,{},{})'".format(
+        title_hook.replace(":", "\\:").replace('"', '\\"'),
+        hook_start,
+        hook_start + hook_dur
+    )
+)
             run([
                 "ffmpeg", "-y", "-i", tight,
                 "-vf", f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
