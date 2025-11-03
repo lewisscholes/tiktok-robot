@@ -7,8 +7,9 @@ import whisper
 APP_AUTH = os.environ.get("AUTH_TOKEN", "changeme")
 CALLBACK = os.environ.get("BASE44_CALLBACK_URL", "")
 MODEL_NAME = os.environ.get("WHISPER_MODEL", "tiny")  # default to tiny
-_model = None
 
+# Lazy model loader to avoid memory spikes at startup
+_model = None
 def get_model():
     global _model
     if _model is None:
@@ -97,93 +98,3 @@ async def process(req: Request):
     lufs = float(settings.get("audio", {}).get("lufs", -14))
     peak = float(settings.get("audio", {}).get("peak_db", -1))
     hook_start = float(settings.get("export", {}).get("hook_start_min_sec", 0.3))
-    hook_dur = float(settings.get("export", {}).get("hook_duration_sec", 2.5))
-
-    work = tempfile.mkdtemp()
-    try:
-        src = os.path.join(work, "input.mp4")
-        dl(raw_url, src)
-
-        # Transcribe with Whisper
-        wav = os.path.join(work, "audio.wav")
-        run(["ffmpeg", "-y", "-i", src, "-vn", "-ac", "1", "-ar", "16000", wav])
-        result = get_model().transcribe(wav, word_timestamps=True)
-        transcript = result.get("text", "").strip()
-
-        # Make hook text
-        title_hook = pick_title_hook(transcript)
-
-        # Shorten long silences
-        tight = os.path.join(work, "tight.mp4")
-        run([
-            "ffmpeg", "-y", "-i", src,
-            "-af", f"silenceremove=start_periods=1:start_silence={pause_trim_ms/1000.0}:"
-                    f"stop_periods=1:stop_silence={pause_trim_ms/1000.0}:detection=peak",
-            "-c:v", "copy", tight
-        ])
-
-        # Captions
-        words = []
-        for seg in result.get("segments", []):
-            for w in seg.get("words", []):
-                if "start" in w and "end" in w:
-                    words.append({"start": w["start"], "end": w["end"], "word": w["word"]})
-        ass_path = None
-        if has_captions and words:
-            ass_path = os.path.join(work, "captions.ass")
-            make_ass_from_chunks(words_to_chunks(words), ass_path)
-
-        # Burn text and export
-        staged = os.path.join(work, "staged.mp4")
-        if ass_path:
-draw = (
-    "drawtext=text='{}'"
-    ":fontcolor=white:fontsize=64:borderw=4:bordercolor=black:"
-    "x=(w-tw)/2:y=h*0.2:enable='between(t,{},{})'".format(
-        title_hook.replace(":", "\\:").replace('"', '\\"'),
-        hook_start,
-        hook_start + hook_dur
-    )
-)
-            run([
-                "ffmpeg", "-y", "-i", tight,
-                "-vf", f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
-                       f"subtitles='{ass_path}',{draw}",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", staged
-            ])
-        else:
-            run([
-                "ffmpeg", "-y", "-i", tight,
-                "-vf", f"drawtext=text='{title_hook}':fontcolor=white:fontsize=64:"
-                       f"borderw=4:bordercolor=black:x=(w-tw)/2:y=h*0.2:"
-                       f"enable='between(t,{hook_start},{hook_start+hook_dur})'",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", staged
-            ])
-
-        # Loudness normalize
-        final_mp4 = os.path.join(work, "final.mp4")
-        run([
-            "ffmpeg", "-y", "-i", staged,
-            "-filter_complex", f"loudnorm=I={lufs}:TP={peak}:LRA=11",
-            "-r", "30", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-            "-c:a", "aac", "-b:a", "160k", final_mp4
-        ])
-
-        # Send back to Base44
-        files = {"edited_file_upload": ("final.mp4", open(final_mp4, "rb"), "video/mp4")}
-        data = {"video_id": video_id, "status": "READY", "title_hook": title_hook}
-        requests.post(CALLBACK, data=data, files=files, timeout=120)
-        return {"ok": True}
-
-    except Exception as e:
-        # Send failure to Base44
-        try:
-            requests.post(CALLBACK, json={
-                "video_id": video_id, "status": "FAILED", "error_msg": str(e)[:800]
-            }, timeout=60)
-        except:
-            pass
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-
