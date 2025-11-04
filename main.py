@@ -83,7 +83,59 @@ def pick_title_hook(text: str) -> str:
     if len(words) > 8:
         line = " ".join(words[:8])
 
-    return line    
+    return line
+def words_to_chunks(words, max_words=3):
+    """
+    Convert Whisper word timestamps into short (<=3 word) chunks for captions.
+    Each chunk has: text, start, end
+    """
+    chunks = []
+    i = 0
+    while i < len(words):
+        group = words[i:i + max_words]
+        if not group:
+            break
+        text = " ".join(w["word"].strip() for w in group).strip()
+        start = group[0]["start"]
+        end = group[-1]["end"]
+        if text:
+            chunks.append({"text": text, "start": start, "end": end})
+        i += max_words
+    return chunks
+
+def make_ass_from_chunks(chunks, ass_path):
+    """
+    Write an .ass subtitle file in a TikTok-style: white text with black border,
+    large font, positioned lower on a 1080x1920 canvas.
+    """
+    header = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: TikTokClassic,Arial,64,&H00FFFFFF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,4,0,2,80,80,240,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+    def ts(t):
+        # h:mm:ss.cs (centiseconds) as ASS expects
+        t = max(0.0, float(t))
+        cs = int(round((t - int(t)) * 100))
+        s = int(t) % 60
+        m = (int(t) // 60) % 60
+        h = int(t) // 3600
+        return f"{h:01d}:{m:02d}:{s:02d}.{cs:02d}"
+
+    with open(ass_path, "w", encoding="utf-8") as f:
+        f.write(header)
+        for c in chunks:
+            f.write(
+                f"Dialogue: 0,{ts(c['start'])},{ts(c['end'])},TikTokClassic,,0,0,0,,{c['text']}\n"
+            )    
 
 @app.api_route("/process", methods=["POST", "OPTIONS"])
 async def process(req: Request):
