@@ -242,12 +242,21 @@ async def process(req: Request):
             "-c:a", "aac", "-b:a", "160k", final_mp4
         ])
 
-        # 9) Callback to Base44
-        files = {"edited_file_upload": ("final.mp4", open(final_mp4, "rb"), "video/mp4")}
-        data  = {"video_id": video_id, "status": "READY", "title_hook": title_hook}
-        requests.post(CALLBACK, data=data, files=files, timeout=120)
+        # 9) Callback to Base44 (with logs)
+files = {"edited_file_upload": ("final.mp4", open(final_mp4, "rb"), "video/mp4")}
+data = {"video_id": video_id, "status": "READY", "title_hook": title_hook}
 
-        return {"ok": True}
+print("⬆️  Posting final to callback:", CALLBACK)
+try:
+    r = requests.post(CALLBACK, data=data, files=files, timeout=120)
+    print("⬅️  Callback response:", r.status_code, r.text[:400])
+    r.raise_for_status()  # surface non-2xx as exceptions
+except Exception as e:
+    print("❌ Callback request failed:", repr(e))
+    # Re-raise so the outer `except` sends FAILED back to Base44
+    raise
+
+return {"ok": True}
 
     except Exception as e:
         # full traceback to logs
