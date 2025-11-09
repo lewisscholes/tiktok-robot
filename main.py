@@ -242,20 +242,28 @@ async def process(req: Request):
             "-c:a", "aac", "-b:a", "160k", final_mp4
         ])
 
-        # 9) Callback to Base44 (with logs)
-files = {"edited_file_upload": ("final.mp4", open(final_mp4, "rb"), "video/mp4")}
-data = {"video_id": video_id, "status": "READY", "title_hook": title_hook}
-
-print("⬆️  Posting final to callback:", CALLBACK)
-try:
-    r = requests.post(CALLBACK, data=data, files=files, timeout=120)
-    print("⬅️  Callback response:", r.status_code, r.text[:400])
-    r.raise_for_status()  # surface non-2xx as exceptions
-except Exception as e:
-    print("❌ Callback request failed:", repr(e))
-    # Re-raise so the outer `except` sends FAILED back to Base44
-    raise
-
+        # 9) Callback to Zapier (webhook)
+ZAPIER_URL = os.environ.get("ZAPIER_WEBHOOK_URL", "").strip()
+if not ZAPIER_URL:
+    print("⚠️  No ZAPIER_WEBHOOK_URL set; skipping Zapier callback")
+else:
+    print("📩  Posting final to Zapier:", ZAPIER_URL)
+    files = {"file": ("final.mp4", open(final_mp4, "rb"), "video/mp4")}
+    payload = {
+        "video_id": video_id,
+        "status": "READY",
+        "title_hook": title_hook,
+        # include anything else Zapier needs:
+        "source": "render",
+    }
+    try:
+        r = requests.post(ZAPIER_URL, data=payload, files=files, timeout=120)
+        print("📨  Zapier response:", r.status_code, r.text[:400])
+        r.raise_for_status()
+    except Exception as e:
+        print("❌ Zapier callback failed:", repr(e))
+        # optional: don't fail the whole job
+        # raise
 return {"ok": True}
 
     except Exception as e:
